@@ -8,6 +8,8 @@ Created by AI Sloperator with Claude Code.
 
 No license is given.
 
+![TermGoo showing text styles, 16, 256 and 24-bit colour, Unicode, box drawing and a Sixel image](screenshot.png)
+
 ## Building
 
 You need the GTK 4.10 or newer development files (Debian and Ubuntu:
@@ -21,6 +23,12 @@ channel.
 
 To install, copy `target/release/termgoo` onto your `PATH`, and optionally
 `termgoo.desktop` to `~/.local/share/applications`.
+
+To see what the display can do, `examples/showcase.rs` fills an 80x24 terminal
+with styles, colours, Unicode and a Sixel image, ready for a screenshot:
+
+    cargo build --release --example showcase
+    target/release/termgoo -hold -e target/release/examples/showcase
 
 ## Command line
 
