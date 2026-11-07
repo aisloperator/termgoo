@@ -109,7 +109,8 @@ pub struct Config {
     pub theme: ThemeChoice,
     pub scrollback: usize,
     pub scrollbar: bool,
-    pub font: String,
+    /// None means the desktop's choice; see `desktop::default_font`.
+    pub font: Option<String>,
     pub term: String,
     pub light: Palette,
     pub dark: Palette,
@@ -121,7 +122,7 @@ impl Default for Config {
             theme: ThemeChoice::Follow,
             scrollback: 10000,
             scrollbar: true,
-            font: "Monospace 11".to_string(),
+            font: None,
             term: "xterm-256color".to_string(),
             light: Palette::light(),
             dark: Palette::dark(),
@@ -179,7 +180,7 @@ impl Config {
                     // Written by earlier versions, which could hide the title bar.
                     "titlebar" => true,
                     "font" => {
-                        cfg.font = value.to_string();
+                        cfg.font = Some(value.to_string());
                         !value.is_empty()
                     }
                     "term" => {
@@ -295,7 +296,8 @@ scrollback = {}
 # Show the scrollbar.
 scrollbar = {}
 
-font = {}
+# Font, such as \"DejaVu Sans Mono 12\". Left unset, it comes from the desktop.
+# font = Monospace 11
 
 # What programs are told in TERM. The emulation stays the same whatever this says.
 term = {}
@@ -305,7 +307,6 @@ term = {}
         d.theme.name(),
         d.scrollback,
         d.scrollbar,
-        d.font,
         d.term,
         palette_text("light", &d.light),
         palette_text("dark", &d.dark),

@@ -100,7 +100,7 @@ impl Options {
             cfg.scrollback = n;
         }
         if let Some(f) = &self.font {
-            cfg.font = f.clone();
+            cfg.font = Some(f.clone());
         }
         if let Some(s) = self.scrollbar {
             cfg.scrollbar = s;

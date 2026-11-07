@@ -37,7 +37,7 @@ impl State {
     fn reload(&self) {
         let mut cfg = Config::load();
         self.options.apply(&mut cfg);
-        self.view.set_font(&cfg.font);
+        self.view.set_font(&font_name(&cfg));
         self.view.set_scrollback(cfg.scrollback);
         self.scrollbar.set_visible(cfg.scrollbar);
         self.theme.set(cfg.theme);
@@ -46,6 +46,11 @@ impl State {
         *self.config.borrow_mut() = cfg;
         self.apply_palette();
     }
+}
+
+/// The font asked for, or else the desktop's.
+fn font_name(config: &Config) -> String {
+    config.font.clone().unwrap_or_else(desktop::default_font)
 }
 
 fn set_action_state(window: &ApplicationWindow, name: &str, value: &glib::Variant) {
@@ -194,7 +199,7 @@ pub fn open(app: &Application, options: &Options) -> Result<(), String> {
     let view = TermView::new(Settings {
         command: options.command.as_deref(),
         term: &config.term,
-        font: &config.font,
+        font: &font_name(&config),
         size: options.geometry.unwrap_or((80, 24)),
         scrollback: config.scrollback,
         palette,

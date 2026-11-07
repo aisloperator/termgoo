@@ -65,7 +65,7 @@ applies changes to a running window. Choices made on the menu are saved here too
     theme = follow           # light, dark, or follow the desktop
     scrollback = 10000
     scrollbar = true
-    font = Monospace 11
+    font = Monospace 11      # unset by default; see below
     term = xterm-256color
 
     [light]
@@ -77,6 +77,13 @@ applies changes to a running window. Choices made on the menu are saved here too
 
     [dark]
     # The same keys.
+
+Without a `font` setting or `-fn`, the font comes from the desktop. GNOME's
+`monospace-font-name` is used in a GNOME session, or anywhere if it has been set
+explicitly. Otherwise, the font is `Monospace` at the size of GTK's `gtk-font-name`,
+so that a GTK setup without the rest of GNOME gets the size it configured. This is
+read at startup and by "Reload Configuration". A `font = Monospace 11` line written
+by an earlier version counts as a choice, so delete it to get the desktop's font.
 
 The two terminal themes are separate from the desktop's GUI theme, which the
 scrollbar and menus always follow. The desktop's light or dark preference comes
