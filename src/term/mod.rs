@@ -5,6 +5,7 @@
 pub mod cell;
 mod parser;
 pub use parser::parse_color;
+mod reflow;
 pub mod sixel;
 #[cfg(test)]
 mod tests;
@@ -419,7 +420,8 @@ impl Terminal {
         self.selection = None;
         let blank = Cell::blank(Color::Default);
 
-        for row in self.primary.iter_mut().chain(self.alternate.iter_mut()) {
+        let width_changed = cols != self.cols;
+        for row in &mut self.alternate {
             row.resize(cols);
         }
         self.tabs.resize(cols, false);
@@ -427,38 +429,27 @@ impl Terminal {
             self.tabs[i] = i % 8 == 0;
         }
 
-        // Each screen keeps the line its own cursor is on. Text below the cursor
-        // goes first; what is still too much scrolls off the top.
-        let primary_row = if self.using_alt { self.saved[0].row } else { self.cur.row };
-        let alt_row = if self.using_alt { self.cur.row } else { self.saved[1].row };
-        let (mut primary_row, mut alt_row) = (primary_row.min(self.rows - 1), alt_row.min(self.rows - 1));
+        // Full-screen programs redraw themselves, so the alternate screen is only
+        // cut or extended. It keeps the line its cursor is on, and text below the
+        // cursor goes first.
+        let mut alt_row = if self.using_alt { self.cur.row } else { self.saved[1].row }.min(self.rows - 1);
         if rows < self.rows {
-            let shift = (primary_row + 1).saturating_sub(rows);
-            for row in self.primary.drain(..shift).collect::<Vec<_>>() {
-                self.push_scrollback(row);
-            }
-            primary_row -= shift;
             let alt_shift = (alt_row + 1).saturating_sub(rows);
             self.alternate.drain(..alt_shift);
             alt_row -= alt_shift;
-        } else if !self.using_alt {
-            // Bring text back out of the scrollback, as far as there is any.
-            for _ in self.rows..rows {
-                let Some(mut row) = self.scrollback.pop_back() else { break };
-                row.resize(cols);
-                self.primary.insert(0, row);
-                self.pushed -= 1;
-                primary_row += 1;
-            }
         }
-        self.primary.resize(rows, Row::new(cols, &blank));
         self.alternate.resize(rows, Row::new(cols, &blank));
         if self.using_alt {
-            self.saved[0].row = primary_row;
             self.cur.row = alt_row;
+            self.cur.wrap_pending &= !width_changed;
         } else {
-            self.cur.row = primary_row;
             self.saved[1].row = alt_row;
+        }
+
+        if width_changed {
+            self.reflow_primary(cols, rows);
+        } else {
+            self.resize_primary_height(rows, &blank);
         }
 
         self.cols = cols;
@@ -468,10 +459,37 @@ impl Terminal {
         self.view_offset = self.view_offset.min(self.scrollback_len());
         self.cur.row = self.cur.row.min(rows - 1);
         self.cur.col = self.cur.col.min(cols - 1);
-        self.cur.wrap_pending = false;
         for s in &mut self.saved {
             s.row = s.row.min(rows - 1);
             s.col = s.col.min(cols - 1);
+        }
+    }
+
+    /// A height change on the primary screen. Text below the cursor goes first; what
+    /// is still too much scrolls off the top, and growing brings it back.
+    fn resize_primary_height(&mut self, rows: usize, blank: &Cell) {
+        let saved = if self.using_alt { self.saved[0] } else { self.cur };
+        let mut row = saved.row.min(self.rows - 1);
+        if rows < self.rows {
+            let shift = (row + 1).saturating_sub(rows);
+            for r in self.primary.drain(..shift).collect::<Vec<_>>() {
+                self.push_scrollback(r);
+            }
+            row -= shift;
+        } else {
+            for _ in self.rows..rows {
+                let Some(mut r) = self.scrollback.pop_back() else { break };
+                r.resize(self.cols);
+                self.primary.insert(0, r);
+                self.pushed -= 1;
+                row += 1;
+            }
+        }
+        self.primary.resize(rows, Row::new(self.cols, blank));
+        if self.using_alt {
+            self.saved[0].row = row;
+        } else {
+            self.cur.row = row;
         }
     }
 
@@ -502,6 +520,11 @@ impl Terminal {
         }
         if width == 2 && self.cur.col + 1 >= self.cols {
             if self.cur.autowrap {
+                let (row, col) = (self.cur.row, self.cur.col);
+                let mut pad = Cell::blank(self.cur.pen.bg);
+                pad.flags = flag::WRAP_PAD;
+                self.split_wide(row, col);
+                self.screen()[row].cells[col] = pad;
                 self.wrap();
             } else {
                 self.cur.col = self.cols - 2;

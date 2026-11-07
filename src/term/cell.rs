@@ -18,6 +18,9 @@ pub mod flag {
     pub const PROTECTED: u16 = 1 << 8;
     /// Right half of a double-width character; holds no text of its own.
     pub const WIDE_CONT: u16 = 1 << 9;
+    /// Blank left at the end of a wrapped row because a double-width character
+    /// did not fit. It is layout, not text, so rewrapping and copying skip it.
+    pub const WRAP_PAD: u16 = 1 << 13;
     /// Underline style lives in these 3 bits; see the `UL_*` values.
     pub const UL_SHIFT: u16 = 10;
     pub const UL_MASK: u16 = 7 << UL_SHIFT;
@@ -87,6 +90,10 @@ impl Cell {
         self.flags & flag::WIDE_CONT != 0
     }
 
+    pub fn is_wrap_pad(&self) -> bool {
+        self.flags & flag::WRAP_PAD != 0
+    }
+
     pub fn tile(&self) -> Option<&Tile> {
         self.extra.as_ref()?.tile.as_ref()
     }
@@ -97,7 +104,7 @@ impl Cell {
     }
 
     pub fn push_text(&self, out: &mut String) {
-        if self.is_wide_cont() {
+        if self.is_wide_cont() || self.is_wrap_pad() {
             return;
         }
         out.push(self.c);
@@ -125,11 +132,18 @@ impl Row {
         self.wrapped = false;
     }
 
-    /// Drop trailing blank cells, to save memory in the scrollback.
+    /// How many cells are left once trailing blanks are ignored.
+    pub fn content_len(&self) -> usize {
+        self.cells.iter().rposition(|c| !c.is_plain_blank()).map_or(0, |i| i + 1)
+    }
+
+    /// Drop trailing blank cells, to save memory in the scrollback. In a wrapped
+    /// row they are real spaces in the middle of a line, so they stay.
     pub fn trim(&mut self) {
-        let keep = self.cells.iter().rposition(|c| !c.is_plain_blank()).map_or(0, |i| i + 1);
-        self.cells.truncate(keep);
-        self.cells.shrink_to_fit();
+        if !self.wrapped {
+            self.cells.truncate(self.content_len());
+            self.cells.shrink_to_fit();
+        }
     }
 
     pub fn resize(&mut self, cols: usize) {

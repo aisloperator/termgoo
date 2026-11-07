@@ -384,10 +384,13 @@ fn resize_width_and_margins() {
     t.resize(6, 5);
     feed(&mut t, "\x1b[5;6Hz");
     assert_eq!(line(&t, 4), "     z");
-    // Cutting a double-width character in half does not leave half of it.
+    // A double-width character moves whole, and never leaves half of itself.
     let mut t = term(4, 1);
     feed(&mut t, "a漢");
     t.resize(2, 1);
+    assert_eq!(line(&t, 0), "漢");
+    assert_eq!(t.scrollback_len(), 1);
+    t.scroll_view(1);
     assert_eq!(line(&t, 0), "a");
 }
 
@@ -591,4 +594,267 @@ fn sixel_query_and_cancel() {
     feed(&mut t, "\x1bPq#1!99~\x18x");
     assert_eq!(cell(&t, 0, 0).c, 'x');
     assert!(cell(&t, 0, 0).tile().is_none());
+}
+
+fn screen(t: &Terminal) -> Vec<String> {
+    (0..t.rows).map(|y| line(t, y)).collect()
+}
+
+/// Everything in the scrollback and on the screen, as the rows now stand.
+fn history(t: &mut Terminal) -> Vec<String> {
+    let back = t.scrollback_len();
+    t.scroll_view(back as isize);
+    let mut rows: Vec<String> = (0..back.min(t.rows)).map(|y| line(t, y)).collect();
+    let mut left = back.saturating_sub(t.rows);
+    while left > 0 {
+        t.scroll_view(-(left.min(t.rows) as isize));
+        let n = left.min(t.rows);
+        rows.extend((0..n).map(|y| line(t, y)));
+        left -= n;
+    }
+    t.view_offset = 0;
+    rows.extend(screen(t));
+    rows
+}
+
+#[test]
+fn narrowing_wraps_and_widening_unwraps() {
+    let mut t = term(10, 4);
+    feed(&mut t, "abcdefghij");
+    t.resize(4, 4);
+    assert_eq!(screen(&t), ["abcd", "efgh", "ij", ""]);
+    assert_eq!(cursor(&t), (2, 2));
+    t.resize(10, 4);
+    assert_eq!(screen(&t), ["abcdefghij", "", "", ""]);
+    assert_eq!(cursor(&t), (0, 9));
+    assert!(t.cur.wrap_pending, "the cursor is still waiting at the end of the line");
+    feed(&mut t, "k");
+    assert_eq!(screen(&t), ["abcdefghij", "k", "", ""]);
+}
+
+#[test]
+fn hard_newlines_stay() {
+    let mut t = term(4, 4);
+    feed(&mut t, "abcdef\r\ngh");
+    assert_eq!(screen(&t), ["abcd", "ef", "gh", ""]);
+    t.resize(8, 4);
+    assert_eq!(screen(&t), ["abcdef", "gh", "", ""]);
+    assert_eq!(cursor(&t), (1, 2));
+}
+
+#[test]
+fn text_lost_to_nothing_across_many_widths() {
+    let mut t = term(20, 5);
+    let text = "the quick brown fox jumps over the lazy dog";
+    feed(&mut t, text);
+    for cols in [7, 3, 11, 1, 40, 5, 20] {
+        t.resize(cols, 5);
+    }
+    t.select_all();
+    assert_eq!(t.selection_text().unwrap().trim_end(), text);
+}
+
+#[test]
+fn wrapping_grows_into_blank_rows_before_scrolling() {
+    let mut t = term(10, 5);
+    feed(&mut t, "abcdefghij\r\nk");
+    t.resize(5, 5);
+    assert_eq!(t.scrollback_len(), 0);
+    assert_eq!(screen(&t), ["abcde", "fghij", "k", "", ""]);
+}
+
+#[test]
+fn overflow_goes_to_the_scrollback_and_comes_back() {
+    let mut t = term(10, 2);
+    feed(&mut t, "abcdefghij\r\nk");
+    t.resize(2, 2);
+    assert_eq!(screen(&t), ["ij", "k"]);
+    assert_eq!(t.scrollback_len(), 4);
+    assert_eq!(cursor(&t), (1, 1));
+    t.resize(10, 2);
+    assert_eq!(screen(&t), ["abcdefghij", "k"]);
+    assert_eq!(t.scrollback_len(), 0);
+}
+
+#[test]
+fn scrollback_rewraps_and_stays_bounded() {
+    let mut t = Terminal::new(6, 2, 4, Palette::dark().theme_colors());
+    feed(&mut t, "abcdefghijkl\r\nm\r\nn\r\no");
+    assert_eq!(t.scrollback_len(), 3);
+    t.resize(12, 2);
+    assert_eq!(history(&mut t), ["abcdefghijkl", "m", "n", "o"]);
+    t.resize(2, 2);
+    assert_eq!(t.scrollback_len(), 4, "narrowing cannot exceed the configured limit");
+    assert_eq!(screen(&t), ["n", "o"]);
+    assert_eq!(cursor(&t), (1, 1));
+}
+
+#[test]
+fn clear_keeps_history_off_the_screen() {
+    let mut t = term(10, 3);
+    feed(&mut t, "1\r\n2\r\n3\r\n4\r\n5\x1b[2J\x1b[H$ ");
+    let back = t.scrollback_len();
+    t.resize(8, 3);
+    assert_eq!(t.scrollback_len(), back);
+    assert_eq!(screen(&t), ["$", "", ""]);
+    assert_eq!(cursor(&t), (0, 2), "the space after the prompt survives");
+}
+
+#[test]
+fn trailing_spaces_before_the_cursor_wrap_too() {
+    let mut t = term(10, 3);
+    feed(&mut t, "ab   ");
+    t.resize(3, 3);
+    assert_eq!(cursor(&t), (1, 2));
+    feed(&mut t, "c");
+    assert_eq!(screen(&t), ["ab", "  c", ""]);
+}
+
+#[test]
+fn spaces_at_a_wrap_point_survive_the_scrollback() {
+    let mut t = term(4, 2);
+    feed(&mut t, "abc def ghi jkl\r\nx\r\ny\r\nz");
+    assert!(t.scrollback_len() > 0);
+    t.resize(20, 2);
+    assert_eq!(history(&mut t)[0], "abc def ghi jkl");
+}
+
+#[test]
+fn wide_characters_stay_whole_and_padding_is_not_text() {
+    let mut t = term(8, 3);
+    feed(&mut t, "a漢字b漢");
+    t.resize(4, 3);
+    assert_eq!(screen(&t), ["a漢", "字b", "漢"]);
+    assert!(cell(&t, 0, 3).is_wrap_pad());
+    t.select_all();
+    assert_eq!(t.selection_text().unwrap().trim_end(), "a漢字b漢", "copying skips the padding");
+    t.resize(8, 3);
+    assert_eq!(screen(&t), ["a漢字b漢", "", ""]);
+    assert_eq!(cursor(&t), (0, 7));
+}
+
+#[test]
+fn padding_from_a_wide_character_that_did_not_fit_goes_on_rejoining() {
+    let mut t = term(3, 2);
+    feed(&mut t, "ab漢");
+    t.resize(6, 2);
+    assert_eq!(screen(&t), ["ab漢", ""]);
+}
+
+#[test]
+fn wide_character_on_a_single_column_is_dropped_safely() {
+    let mut t = term(4, 2);
+    feed(&mut t, "a漢b");
+    t.resize(1, 2);
+    t.resize(4, 2);
+    assert_eq!(t.cols, 4);
+}
+
+#[test]
+fn attributes_and_combining_marks_move_with_their_text() {
+    let mut t = term(6, 3);
+    feed(&mut t, "abcd\x1b[31me\u{301}f");
+    t.resize(4, 3);
+    assert_eq!(line(&t, 1), "e\u{301}f");
+    assert_eq!(cell(&t, 1, 0).fg, Color::Indexed(1));
+}
+
+#[test]
+fn alternate_screen_is_not_rewrapped_but_the_primary_is() {
+    let mut t = term(10, 3);
+    feed(&mut t, "abcdefghij\x1b[?1049h\x1b[Hfull screen");
+    t.resize(5, 3);
+    assert_eq!(line(&t, 0), "full", "cut, not wrapped");
+    feed(&mut t, "\x1b[?1049l");
+    assert_eq!(screen(&t), ["abcde", "fghij", ""]);
+    assert_eq!(cursor(&t), (1, 4));
+    feed(&mut t, "k");
+    assert_eq!(line(&t, 2), "k");
+}
+
+#[test]
+fn images_keep_their_rows() {
+    let mut t = term(10, 4);
+    (t.cell_w, t.cell_h) = (8, 12);
+    sixel(&mut t, 2);
+    feed(&mut t, "abcdefghij");
+    t.resize(5, 4);
+    assert!(cell(&t, 0, 0).tile().is_some());
+    assert!(cell(&t, 0, 1).tile().is_some());
+    assert!(cell(&t, 1, 0).tile().is_none());
+    assert_eq!(line(&t, 1), "abcde");
+    assert_eq!(line(&t, 2), "fghij");
+}
+
+#[test]
+fn saved_cursor_moves_with_its_text() {
+    let mut t = term(10, 4);
+    feed(&mut t, "abcdefgh\x1b7\x1b[4;1H");
+    t.resize(4, 4);
+    feed(&mut t, "\x1b8Z");
+    assert_eq!(screen(&t), ["efgh", "Z", "", ""], "it continues right after the text");
+}
+
+#[test]
+fn scrolled_back_view_stays_on_its_text() {
+    let mut t = term(4, 2);
+    for i in 0..9 {
+        feed(&mut t, &format!("{i}\r\n"));
+    }
+    t.scroll_view(3);
+    let before = line(&t, 0);
+    t.resize(6, 2);
+    assert_eq!(line(&t, 0), before);
+    assert!(t.view_offset > 0);
+}
+
+#[test]
+fn height_and_width_change_together() {
+    let mut t = term(10, 2);
+    feed(&mut t, "abcdefghij");
+    t.resize(5, 6);
+    assert_eq!(screen(&t), ["abcde", "fghij", "", "", "", ""]);
+    feed(&mut t, "\x1b[6;5Hz");
+    assert_eq!(line(&t, 5), "    z");
+}
+
+#[test]
+fn resizing_output_at_every_stage_keeps_the_screen_consistent() {
+    let mut t = term(7, 4);
+    let mut x: u32 = 99;
+    let mut next = |n: u32| {
+        x = x.wrapping_mul(1103515245).wrapping_add(12345);
+        (x >> 16) % n
+    };
+    let pieces = ["word ", "漢字", "\r\n", "\x1b[2J", "\x1b[H", "\x1b[?1049h", "\x1b[?1049l", "\x1b7", "\x1b8",
+        "e\u{301}", "\x1b[K", "\x1b[5;2r", "\x1b[r", "\x1b[3L", "\x1b[2M", "\x1bc", "\x1b[3S", "aaaaaaaaaaaaaaaaaaaa"];
+    for _ in 0..20_000 {
+        feed(&mut t, pieces[next(pieces.len() as u32) as usize]);
+        if next(4) == 0 {
+            t.resize(1 + next(30) as usize, 1 + next(12) as usize);
+            t.scroll_view(next(5) as isize);
+        }
+        assert_eq!(t.primary.len(), t.rows);
+        assert_eq!(t.alternate.len(), t.rows);
+        assert!(t.primary.iter().chain(t.alternate.iter()).all(|r| r.cells.len() == t.cols));
+        assert!(t.cur.row < t.rows && t.cur.col < t.cols);
+        assert!(t.scrollback.len() <= t.max_scrollback);
+        assert!(t.pushed >= t.scrollback.len() as u64);
+        (0..t.rows).for_each(|y| assert!(t.display_row(y).cells.len() <= t.cols.max(64)));
+    }
+}
+
+#[test]
+#[ignore = "timing report; run with --ignored --nocapture"]
+fn reflow_speed() {
+    for lines in [10_000, 100_000] {
+        let mut t = Terminal::new(100, 40, lines, Palette::dark().theme_colors());
+        let text = "x".repeat(250) + "\r\n";
+        for _ in 0..lines {
+            feed(&mut t, &text);
+        }
+        let start = std::time::Instant::now();
+        t.resize(83, 40);
+        println!("{lines} long lines: {:?}", start.elapsed());
+    }
 }

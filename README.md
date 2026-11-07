@@ -114,7 +114,10 @@ behalf:
 
 Tektronix graphics, tabs and multiplexing are left out by design.
 
-Not implemented yet: text reflow on resize (narrowing cuts lines off), left and right
-margins (DECSLRM), rectangular area operations, double-width and double-height lines,
+Changing the window's width rewraps the text on the main screen and in the
+scrollback, as long as no image is on the line. Lines with a Sixel image are cut
+at the edge instead, as is the alternate screen, where programs redraw themselves.
+
+Not implemented yet: left and right margins (DECSLRM), rectangular area operations, double-width and double-height lines,
 132-column switching, on-screen input method preedit text, 8-bit (non-UTF-8) mode,
 and drawing unset Sixel pixels in anything but the background.
