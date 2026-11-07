@@ -31,6 +31,11 @@ fn rgba((r, g, b): Rgb) -> gdk::RGBA {
     gdk::RGBA::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0)
 }
 
+/// Box drawing and block elements, which are always drawn one cell at a time.
+fn is_line_art(text: &str) -> bool {
+    text.chars().next().is_some_and(|c| ('\u{2500}'..='\u{259f}').contains(&c))
+}
+
 /// Metrics and cached text layouts for the current font.
 struct Font {
     descriptions: [pango::FontDescription; 4],
@@ -71,10 +76,20 @@ impl Font {
     }
 
     /// Draw on the grid's baseline: a fallback font's own may be lower or higher.
-    fn draw(&self, s: &gtk::Snapshot, layout: &pango::Layout, x: f32, top: f32, color: Rgb) {
-        let shift = (self.baseline * pango::SCALE - layout.baseline()) as f32 / pango::SCALE as f32;
+    fn draw(&self, s: &gtk::Snapshot, layout: &pango::Layout, text: &str, x: f32, top: f32, color: Rgb) {
         s.save();
-        s.translate(&Point::new(x, top + shift));
+        if is_line_art(text) {
+            // Line art has to touch its neighbours, so it fills the cell exactly.
+            let (_, logical) = layout.extents();
+            s.translate(&Point::new(x, top));
+            s.scale(
+                self.cell_w as f32 * pango::SCALE as f32 / logical.width().max(1) as f32,
+                self.cell_h as f32 * pango::SCALE as f32 / logical.height().max(1) as f32,
+            );
+        } else {
+            let shift = (self.baseline * pango::SCALE - layout.baseline()) as f32 / pango::SCALE as f32;
+            s.translate(&Point::new(x, top + shift));
+        }
         s.append_layout(layout, &rgba(color));
         s.restore();
     }
@@ -92,7 +107,9 @@ impl Font {
         let layout = widget.create_pango_layout(Some(text));
         layout.set_font_description(Some(&self.descriptions[style as usize]));
         let attrs = pango::AttrList::new();
-        attrs.insert(pango::AttrInt::new_letter_spacing(self.letter_spacing));
+        if !is_line_art(text) {
+            attrs.insert(pango::AttrInt::new_letter_spacing(self.letter_spacing));
+        }
         attrs.insert(pango::AttrFontFeatures::new("liga 0, clig 0, calt 0"));
         layout.set_attributes(Some(&attrs));
         cache.insert(key, layout.clone());
@@ -956,7 +973,7 @@ impl TermView {
                 let text = run.trim_end_matches(' ');
                 if !text.is_empty() {
                     let layout = font.layout(widget, key.0, text);
-                    font.draw(s, &layout, pad + start as f32 * cw, top, key.1);
+                    font.draw(s, &layout, text, pad + start as f32 * cw, top, key.1);
                 }
                 run.clear();
             };
@@ -1144,7 +1161,7 @@ impl TermView {
                     style |= ITALIC;
                 }
                 let layout = font.layout(self.upcast_ref(), style, &text);
-                font.draw(s, &layout, left, top, defaults.1);
+                font.draw(s, &layout, &text, left, top, defaults.1);
             }
         }
     }
