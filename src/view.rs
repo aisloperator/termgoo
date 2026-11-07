@@ -716,9 +716,6 @@ impl TermView {
         let inner = self.inner();
         self.grab_focus();
 
-        if button == gdk::BUTTON_PRIMARY && mods.contains(M::ALT_MASK) && self.begin_window_move(event) {
-            return;
-        }
         let cell = self.cell_at(x, y);
         inner.pointer_cell.set(cell);
         if self.reporting(mods) {
@@ -740,17 +737,6 @@ impl TermView {
             gdk::BUTTON_SECONDARY => self.show_menu(x, y),
             _ => {}
         }
-    }
-
-    fn begin_window_move(&self, event: &gdk::Event) -> bool {
-        let Some(window) = self.root().and_downcast::<gtk::Window>() else { return false };
-        if window.is_decorated() {
-            return false;
-        }
-        let Some(surface) = window.surface().and_downcast::<gdk::Toplevel>() else { return false };
-        let (Some(device), Some((x, y))) = (event.device(), event.position()) else { return false };
-        surface.begin_move(&device, gdk::BUTTON_PRIMARY as i32, x, y, event.time());
-        true
     }
 
     fn position_at(&self, cell: (usize, usize)) -> Pos {

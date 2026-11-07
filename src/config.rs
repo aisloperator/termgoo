@@ -109,7 +109,6 @@ pub struct Config {
     pub theme: ThemeChoice,
     pub scrollback: usize,
     pub scrollbar: bool,
-    pub titlebar: bool,
     pub font: String,
     pub term: String,
     pub light: Palette,
@@ -122,7 +121,6 @@ impl Default for Config {
             theme: ThemeChoice::Follow,
             scrollback: 10000,
             scrollbar: true,
-            titlebar: false,
             font: "Monospace 11".to_string(),
             term: "xterm-256color".to_string(),
             light: Palette::light(),
@@ -178,7 +176,8 @@ impl Config {
                         _ => false,
                     },
                     "scrollbar" => parse_bool(value).map(|b| cfg.scrollbar = b).is_some(),
-                    "titlebar" => parse_bool(value).map(|b| cfg.titlebar = b).is_some(),
+                    // Written by earlier versions, which could hide the title bar.
+                    "titlebar" => true,
                     "font" => {
                         cfg.font = value.to_string();
                         !value.is_empty()
@@ -293,9 +292,8 @@ theme = {}
 # Lines of scrollback to keep.
 scrollback = {}
 
-# Show the scrollbar, and the window's title bar.
+# Show the scrollbar.
 scrollbar = {}
-titlebar = {}
 
 font = {}
 
@@ -307,7 +305,6 @@ term = {}
         d.theme.name(),
         d.scrollback,
         d.scrollbar,
-        d.titlebar,
         d.font,
         d.term,
         palette_text("light", &d.light),
@@ -343,6 +340,13 @@ mod tests {
     fn bad_lines_are_reported_and_skipped() {
         let (cfg, errors) = Config::parse("theme = pink\nnonsense\n[dark]\ncolor16 = #000000\nscrollback = 1\n");
         assert_eq!(errors.len(), 4);
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn retired_titlebar_setting_is_ignored_quietly() {
+        let (cfg, errors) = Config::parse("titlebar = false\n");
+        assert!(errors.is_empty());
         assert_eq!(cfg, Config::default());
     }
 

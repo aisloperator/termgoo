@@ -1,8 +1,8 @@
 # TermGoo
 
 A terminal emulator for Linux desktops, on X11 and Wayland, built with GTK4 and
-written in Rust. The window is a blank terminal screen with an optional
-scrollbar. Everything else is on the right-click menu.
+written in Rust. Inside the desktop's usual window frame is a blank terminal
+screen with an optional scrollbar. Everything else is on the right-click menu.
 
 Created by AI Sloperator with Claude Code.
 
@@ -44,7 +44,7 @@ Command line options apply to that process only. `--title` works as well as `-ti
 ## Using it
 
 The right-click menu has Copy, Paste, Select All, the terminal theme, the
-scrollbar and title bar toggles, Clear Scrollback, Reset Terminal, the
+scrollbar toggle, Clear Scrollback, Reset Terminal, the
 configuration commands, About and Close Window.
 
 | Input | Effect |
@@ -56,11 +56,6 @@ configuration commands, About and Close Window.
 | Mouse wheel, scrollbar | Scroll |
 | Shift + mouse | Select text or open the menu when a program is using the mouse |
 
-The title bar is off by default, so the window edges resize the window and
-Alt+drag moves it. A desktop that claims Alt for itself offers its own shortcut,
-such as Super+drag. "Show Title Bar" restores the desktop's usual frame; changing
-it recreates the window, which the window manager may then place elsewhere.
-
 ## Configuration
 
 `~/.config/termgoo/config`, or under `$XDG_CONFIG_HOME`. "Open Configuration File"
@@ -70,7 +65,6 @@ applies changes to a running window. Choices made on the menu are saved here too
     theme = follow           # light, dark, or follow the desktop
     scrollback = 10000
     scrollbar = true
-    titlebar = false
     font = Monospace 11
     term = xterm-256color
 

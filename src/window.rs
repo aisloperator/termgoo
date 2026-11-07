@@ -5,16 +5,12 @@ use crate::cli::Options;
 use crate::config::{Config, ThemeChoice};
 use crate::desktop;
 use crate::view::{Settings, TermView};
-use gtk::gdk::{self, SurfaceEdge};
 use gtk::gio::prelude::*;
 use gtk::glib::{self, clone};
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, gio};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-
-/// Width of the band along the edge of a window without a title bar that resizes it.
-const GRIP: f64 = 4.0;
 
 /// One process, one window. Tabs and multiplexing are deliberately absent.
 struct State {
@@ -44,30 +40,12 @@ impl State {
         self.view.set_font(&cfg.font);
         self.view.set_scrollback(cfg.scrollback);
         self.scrollbar.set_visible(cfg.scrollbar);
-        set_titlebar(&self.window, cfg.titlebar);
         self.theme.set(cfg.theme);
         set_action_state(&self.window, "scrollbar", &cfg.scrollbar.to_variant());
-        set_action_state(&self.window, "titlebar", &cfg.titlebar.to_variant());
         set_action_state(&self.window, "theme", &cfg.theme.name().to_variant());
         *self.config.borrow_mut() = cfg;
         self.apply_palette();
     }
-}
-
-/// GTK settles how a window is decorated when it is realized, so a change takes
-/// a new surface. The menu's click is still being handled now, hence the idle.
-fn set_titlebar(window: &ApplicationWindow, on: bool) {
-    if window.is_decorated() == on {
-        return;
-    }
-    glib::idle_add_local_once(clone!(#[weak] window, move || {
-        let (width, height) = (window.width(), window.height());
-        window.set_visible(false);
-        WidgetExt::unrealize(&window);
-        window.set_decorated(on);
-        window.set_default_size(width, height);
-        window.present();
-    }));
 }
 
 fn set_action_state(window: &ApplicationWindow, name: &str, value: &glib::Variant) {
@@ -98,7 +76,6 @@ fn build_menu() -> gio::Menu {
     let view = gio::Menu::new();
     view.append_submenu(Some("Terminal Theme"), &theme);
     view.append(Some("Show Scrollbar"), Some("win.scrollbar"));
-    view.append(Some("Show Title Bar"), Some("win.titlebar"));
     menu.append_section(None, &view);
 
     let terminal = gio::Menu::new();
@@ -181,9 +158,6 @@ fn add_actions(state: &Rc<State>) {
     toggle("scrollbar", cfg.scrollbar, Box::new(clone!(
         #[strong] state, move |on| state.scrollbar.set_visible(on)
     )));
-    toggle("titlebar", cfg.titlebar, Box::new(clone!(
-        #[strong] window, move |on| set_titlebar(&window, on)
-    )));
 
     let theme = gio::SimpleAction::new_stateful(
         "theme",
@@ -208,66 +182,6 @@ fn add_actions(state: &Rc<State>) {
     state.view.set_menu(&build_menu(), clone!(#[strong] view, move || {
         copy.set_enabled(view.has_selection());
     }));
-}
-
-/// Which resize edge a point is on, if the window has no frame to do that for it.
-fn edge_at(x: f64, y: f64, w: f64, h: f64) -> Option<SurfaceEdge> {
-    let (left, right) = (x < GRIP, x >= w - GRIP);
-    let (top, bottom) = (y < GRIP, y >= h - GRIP);
-    Some(match (left, right, top, bottom) {
-        (true, _, true, _) => SurfaceEdge::NorthWest,
-        (_, true, true, _) => SurfaceEdge::NorthEast,
-        (true, _, _, true) => SurfaceEdge::SouthWest,
-        (_, true, _, true) => SurfaceEdge::SouthEast,
-        (true, ..) => SurfaceEdge::West,
-        (_, true, ..) => SurfaceEdge::East,
-        (_, _, true, _) => SurfaceEdge::North,
-        (_, _, _, true) => SurfaceEdge::South,
-        _ => return None,
-    })
-}
-
-fn edge_cursor(edge: SurfaceEdge) -> &'static str {
-    match edge {
-        SurfaceEdge::NorthWest => "nw-resize",
-        SurfaceEdge::NorthEast => "ne-resize",
-        SurfaceEdge::SouthWest => "sw-resize",
-        SurfaceEdge::SouthEast => "se-resize",
-        SurfaceEdge::West => "w-resize",
-        SurfaceEdge::East => "e-resize",
-        SurfaceEdge::North => "n-resize",
-        _ => "s-resize",
-    }
-}
-
-/// With no title bar there is no frame either, so the window edge does its job.
-fn add_resize_grips(window: &ApplicationWindow) {
-    let size = |w: &ApplicationWindow| (w.width() as f64, w.height() as f64);
-
-    let motion = gtk::EventControllerMotion::new();
-    motion.set_propagation_phase(gtk::PropagationPhase::Capture);
-    motion.connect_motion(clone!(#[weak] window, move |_, x, y| {
-        let (w, h) = size(&window);
-        let edge = if window.is_decorated() { None } else { edge_at(x, y, w, h) };
-        window.set_cursor_from_name(edge.map(edge_cursor));
-    }));
-    window.add_controller(motion);
-
-    let press = gtk::GestureClick::new();
-    press.set_button(gdk::BUTTON_PRIMARY);
-    press.set_propagation_phase(gtk::PropagationPhase::Capture);
-    press.connect_pressed(clone!(#[weak] window, move |gesture, _, x, y| {
-        if window.is_decorated() {
-            return;
-        }
-        let (w, h) = size(&window);
-        let Some(edge) = edge_at(x, y, w, h) else { return };
-        let Some(surface) = window.surface().and_downcast::<gdk::Toplevel>() else { return };
-        let Some(device) = gesture.device() else { return };
-        gesture.set_state(gtk::EventSequenceState::Claimed);
-        surface.begin_resize(edge, Some(&device), gdk::BUTTON_PRIMARY as i32, x, y, gesture.current_event_time());
-    }));
-    window.add_controller(press);
 }
 
 /// Build and show the window. Failing to start the program is fatal: the error goes
@@ -299,7 +213,6 @@ pub fn open(app: &Application, options: &Options) -> Result<(), String> {
     let window = ApplicationWindow::builder()
         .application(app)
         .title(options.window_title())
-        .decorated(config.titlebar)
         .child(&content)
         .build();
 
@@ -316,7 +229,6 @@ pub fn open(app: &Application, options: &Options) -> Result<(), String> {
         desktop_dark: Cell::new(false),
     });
     add_actions(&state);
-    add_resize_grips(&window);
 
     desktop::watch(clone!(#[strong] state, move |dark| {
         state.desktop_dark.set(dark);
