@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TermGoo
+Comment=Terminal emulator
+Exec=termgoo
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupNotify=false

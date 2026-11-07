@@ -1,0 +1,16 @@
+[package]
+name = "termgoo"
+version = "0.1.0"
+edition = "2024"
+description = "TermGoo: a GTK4 terminal emulator with xterm emulation, Unicode and Sixel"
+authors = ["AI Sloperator with Claude Code"]
+publish = false
+
+[dependencies]
+glib-unix = "0.22"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
