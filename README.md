@@ -67,8 +67,11 @@ configuration commands, About and Close Window.
 ## Configuration
 
 `~/.config/termgoo/config`, or under `$XDG_CONFIG_HOME`. "Open Configuration File"
-on the menu creates it with every setting listed, and "Reload Configuration"
-applies changes to a running window. Choices made on the menu are saved here too.
+on the menu creates it with every setting listed and opens it in `$VISUAL` or
+`$EDITOR`, in a new TermGoo window. With neither set, the desktop's default program
+for plain text opens it instead; `xdg-mime query default text/plain` shows which
+one that is. "Reload Configuration" applies changes to a running window. Choices
+made on the menu are saved here too.
 
     theme = follow           # light, dark, or follow the desktop
     scrollback = 10000

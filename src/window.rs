@@ -112,15 +112,52 @@ fn show_about(window: &ApplicationWindow) {
         .present();
 }
 
+/// The user's editor, as terminal programs look for it.
+fn editor_from_env() -> Option<String> {
+    ["VISUAL", "EDITOR"].into_iter().find_map(|v| std::env::var(v).ok().filter(|s| !s.trim().is_empty()))
+}
+
+/// Open the file in the user's editor in a new TermGoo window. As in Git, the
+/// setting is shell code, so it may have arguments and quoting. The path travels
+/// as an argument, so it needs no quoting of its own. If the editor fails, the
+/// window stays open to say so.
+fn edit_in_terminal(editor: &str, path: &std::path::Path) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let script = format!(
+        "{editor} \"$@\"\nstatus=$?\n\
+         [ $status -eq 0 ] || {{ printf '\\nThe editor exited with status %s. Press Enter to close.' $status; read _; }}"
+    );
+    let argv = [
+        exe.as_os_str(),
+        "-title".as_ref(),
+        "TermGoo configuration".as_ref(),
+        "-e".as_ref(),
+        "/bin/sh".as_ref(),
+        "-c".as_ref(),
+        script.as_ref(),
+        "sh".as_ref(),
+        path.as_os_str(),
+    ];
+    // GLib waits for the process, so it does not linger after it exits.
+    gio::Subprocess::newv(&argv, gio::SubprocessFlags::NONE).map(drop).map_err(|e| e.to_string())
+}
+
+/// Like other terminal programs, prefer `$VISUAL` and `$EDITOR`. Only without them
+/// does the desktop choose, which it does by the file's type, `text/plain`.
 fn open_config() {
-    match Config::ensure_file() {
-        Ok(path) => {
+    let path = match Config::ensure_file() {
+        Ok(path) => path,
+        Err(e) => return eprintln!("termgoo: cannot create the configuration file: {e}"),
+    };
+    let result = match editor_from_env() {
+        Some(editor) => edit_in_terminal(&editor, &path),
+        None => {
             let uri = gio::File::for_path(&path).uri();
-            if let Err(e) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {
-                eprintln!("termgoo: cannot open {}: {e}", path.display());
-            }
+            gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>).map_err(|e| e.to_string())
         }
-        Err(e) => eprintln!("termgoo: cannot create the configuration file: {e}"),
+    };
+    if let Err(e) = result {
+        eprintln!("termgoo: cannot open {}: {e}", path.display());
     }
 }
 
