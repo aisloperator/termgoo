@@ -142,8 +142,18 @@ fn edit_in_terminal(editor: &str, path: &std::path::Path) -> Result<(), String> 
     gio::Subprocess::newv(&argv, gio::SubprocessFlags::NONE).map(drop).map_err(|e| e.to_string())
 }
 
-/// Like other terminal programs, prefer `$VISUAL` and `$EDITOR`. Only without them
-/// does the desktop choose, which it does by the file's type, `text/plain`.
+/// Open the file with the desktop's program for plain text. This asks for that
+/// type directly: opening the file's URI would first ask for a handler of the
+/// `file:` scheme, which an installed program can claim for every file.
+fn open_as_text(path: &std::path::Path) -> Result<(), String> {
+    let app = gio::AppInfo::default_for_type("text/plain", false)
+        .ok_or("no program is set up to open plain text")?;
+    app.launch(&[gio::File::for_path(path)], None::<&gio::AppLaunchContext>).map_err(|e| e.to_string())
+}
+
+/// As Debian Policy 11.4 asks of programs that start an editor, and as other
+/// terminals do, prefer `$VISUAL` and then `$EDITOR`. Only without them does the
+/// desktop choose.
 fn open_config() {
     let path = match Config::ensure_file() {
         Ok(path) => path,
@@ -151,10 +161,7 @@ fn open_config() {
     };
     let result = match editor_from_env() {
         Some(editor) => edit_in_terminal(&editor, &path),
-        None => {
-            let uri = gio::File::for_path(&path).uri();
-            gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>).map_err(|e| e.to_string())
-        }
+        None => open_as_text(&path),
     };
     if let Err(e) = result {
         eprintln!("termgoo: cannot open {}: {e}", path.display());
