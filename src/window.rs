@@ -2,6 +2,7 @@
 //! holds every command.
 
 use crate::cli::Options;
+use crate::prefs;
 use crate::config::{Config, ThemeChoice};
 use crate::desktop;
 use crate::view::{Settings, TermView};
@@ -17,52 +18,66 @@ struct State {
     window: ApplicationWindow,
     view: TermView,
     scrollbar: gtk::Scrollbar,
-    options: Options,
     config: RefCell<Config>,
-    theme: Cell<ThemeChoice>,
     desktop_dark: Cell<bool>,
+    prefs: RefCell<Option<gtk::Window>>,
 }
 
 impl State {
     fn apply_palette(&self) {
-        let dark = match self.theme.get() {
+        let cfg = self.config.borrow();
+        let dark = match cfg.theme {
             ThemeChoice::Follow => self.desktop_dark.get(),
             ThemeChoice::Light => false,
             ThemeChoice::Dark => true,
         };
-        let cfg = self.config.borrow();
         self.view.set_palette(if dark { cfg.dark.clone() } else { cfg.light.clone() });
     }
 
-    fn reload(&self) {
-        let mut cfg = Config::load();
-        self.options.apply(&mut cfg);
-        self.view.set_font(&font_name(&cfg));
-        self.view.set_scrollback(cfg.scrollback);
-        self.scrollbar.set_visible(cfg.scrollbar);
-        self.theme.set(cfg.theme);
-        set_action_state(&self.window, "scrollbar", &cfg.scrollbar.to_variant());
-        set_action_state(&self.window, "theme", &cfg.theme.name().to_variant());
-        *self.config.borrow_mut() = cfg;
-        self.apply_palette();
+    /// Change the settings and put into effect what changed. TERM is left alone:
+    /// the program running already has it.
+    fn update(&self, change: &dyn Fn(&mut Config)) {
+        let old = self.config.borrow().clone();
+        let mut new = old.clone();
+        change(&mut new);
+        *self.config.borrow_mut() = new.clone();
+        if new.font != old.font {
+            self.view.set_font(&font_name(&new));
+        }
+        if new.scrollback != old.scrollback {
+            self.view.set_scrollback(new.scrollback);
+        }
+        if new.scrollbar != old.scrollbar {
+            self.scrollbar.set_visible(new.scrollbar);
+        }
+        if (new.theme, &new.light, &new.dark) != (old.theme, &old.light, &old.dark) {
+            self.apply_palette();
+        }
+    }
+
+    fn show_prefs(self: &Rc<Self>) {
+        if let Some(w) = &*self.prefs.borrow() {
+            return w.present();
+        }
+        let weak = Rc::downgrade(self);
+        let apply: prefs::Apply = Rc::new(move |change| {
+            if let Some(state) = weak.upgrade() {
+                state.update(change);
+            }
+        });
+        let w = prefs::window(&self.window, &self.config.borrow(), apply);
+        w.connect_close_request(clone!(#[weak(rename_to = state)] self, #[upgrade_or] glib::Propagation::Proceed, move |_| {
+            state.prefs.take();
+            glib::Propagation::Proceed
+        }));
+        w.present();
+        *self.prefs.borrow_mut() = Some(w);
     }
 }
 
 /// The font asked for, or else the desktop's.
 fn font_name(config: &Config) -> String {
     config.font.clone().unwrap_or_else(desktop::default_font)
-}
-
-fn set_action_state(window: &ApplicationWindow, name: &str, value: &glib::Variant) {
-    if let Some(action) = window.lookup_action(name) {
-        action.change_state(value);
-    }
-}
-
-fn save(key: &str, value: &str) {
-    if let Err(e) = Config::store(key, value) {
-        eprintln!("termgoo: cannot save {key}: {e}");
-    }
 }
 
 fn build_menu() -> gio::Menu {
@@ -74,23 +89,13 @@ fn build_menu() -> gio::Menu {
     edit.append(Some("Select All"), Some("win.select-all"));
     menu.append_section(None, &edit);
 
-    let theme = gio::Menu::new();
-    theme.append(Some("Follow Desktop"), Some("win.theme::follow"));
-    theme.append(Some("Light"), Some("win.theme::light"));
-    theme.append(Some("Dark"), Some("win.theme::dark"));
-    let view = gio::Menu::new();
-    view.append_submenu(Some("Terminal Theme"), &theme);
-    view.append(Some("Show Scrollbar"), Some("win.scrollbar"));
-    menu.append_section(None, &view);
-
     let terminal = gio::Menu::new();
     terminal.append(Some("Clear Scrollback"), Some("win.clear-scrollback"));
     terminal.append(Some("Reset Terminal"), Some("win.reset"));
     menu.append_section(None, &terminal);
 
     let settings = gio::Menu::new();
-    settings.append(Some("Open Configuration File"), Some("win.open-config"));
-    settings.append(Some("Reload Configuration"), Some("win.reload-config"));
+    settings.append(Some("Preferences"), Some("win.preferences"));
     menu.append_section(None, &settings);
 
     let last = gio::Menu::new();
@@ -112,62 +117,6 @@ fn show_about(window: &ApplicationWindow) {
         .present();
 }
 
-/// The user's editor, as terminal programs look for it.
-fn editor_from_env() -> Option<String> {
-    ["VISUAL", "EDITOR"].into_iter().find_map(|v| std::env::var(v).ok().filter(|s| !s.trim().is_empty()))
-}
-
-/// Open the file in the user's editor in a new TermGoo window. As in Git, the
-/// setting is shell code, so it may have arguments and quoting. The path travels
-/// as an argument, so it needs no quoting of its own. If the editor fails, the
-/// window stays open to say so.
-fn edit_in_terminal(editor: &str, path: &std::path::Path) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let script = format!(
-        "{editor} \"$@\"\nstatus=$?\n\
-         [ $status -eq 0 ] || {{ printf '\\nThe editor exited with status %s. Press Enter to close.' $status; read _; }}"
-    );
-    let argv = [
-        exe.as_os_str(),
-        "-title".as_ref(),
-        "TermGoo configuration".as_ref(),
-        "-e".as_ref(),
-        "/bin/sh".as_ref(),
-        "-c".as_ref(),
-        script.as_ref(),
-        "sh".as_ref(),
-        path.as_os_str(),
-    ];
-    // GLib waits for the process, so it does not linger after it exits.
-    gio::Subprocess::newv(&argv, gio::SubprocessFlags::NONE).map(drop).map_err(|e| e.to_string())
-}
-
-/// Open the file with the desktop's program for plain text. This asks for that
-/// type directly: opening the file's URI would first ask for a handler of the
-/// `file:` scheme, which an installed program can claim for every file.
-fn open_as_text(path: &std::path::Path) -> Result<(), String> {
-    let app = gio::AppInfo::default_for_type("text/plain", false)
-        .ok_or("no program is set up to open plain text")?;
-    app.launch(&[gio::File::for_path(path)], None::<&gio::AppLaunchContext>).map_err(|e| e.to_string())
-}
-
-/// As Debian Policy 11.4 asks of programs that start an editor, and as other
-/// terminals do, prefer `$VISUAL` and then `$EDITOR`. Only without them does the
-/// desktop choose.
-fn open_config() {
-    let path = match Config::ensure_file() {
-        Ok(path) => path,
-        Err(e) => return eprintln!("termgoo: cannot create the configuration file: {e}"),
-    };
-    let result = match editor_from_env() {
-        Some(editor) => edit_in_terminal(&editor, &path),
-        None => open_as_text(&path),
-    };
-    if let Err(e) = result {
-        eprintln!("termgoo: cannot open {}: {e}", path.display());
-    }
-}
-
 fn add_actions(state: &Rc<State>) {
     let window = &state.window;
     let simple = |name: &str, f: Box<dyn Fn()>| {
@@ -182,51 +131,9 @@ fn add_actions(state: &Rc<State>) {
     simple("select-all", Box::new(clone!(#[strong] view, move || view.select_all())));
     simple("clear-scrollback", Box::new(clone!(#[strong] view, move || view.clear_scrollback())));
     simple("reset", Box::new(clone!(#[strong] view, move || view.reset())));
-    simple("open-config", Box::new(open_config));
-    simple("reload-config", Box::new(clone!(#[strong] state, move || state.reload())));
+    simple("preferences", Box::new(clone!(#[strong] state, move || state.show_prefs())));
     simple("about", Box::new(clone!(#[strong] window, move || show_about(&window))));
     simple("close", Box::new(clone!(#[strong] window, move || window.close())));
-
-    let toggle = |name: &'static str, initial: bool, f: Box<dyn Fn(bool)>| {
-        let action = gio::SimpleAction::new_stateful(name, None, &initial.to_variant());
-        action.connect_change_state(move |action, value| {
-            if let Some(on) = value.and_then(|v| v.get::<bool>()) {
-                action.set_state(&on.to_variant());
-                f(on);
-            }
-        });
-        // Activation is the menu's doing, so unlike a reload it updates the file.
-        action.connect_activate(move |action, _| {
-            let on = !action.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
-            action.change_state(&on.to_variant());
-            save(name, if on { "true" } else { "false" });
-        });
-        window.add_action(&action);
-    };
-    let cfg = state.config.borrow();
-    toggle("scrollbar", cfg.scrollbar, Box::new(clone!(
-        #[strong] state, move |on| state.scrollbar.set_visible(on)
-    )));
-
-    let theme = gio::SimpleAction::new_stateful(
-        "theme",
-        Some(glib::VariantTy::STRING),
-        &state.theme.get().name().to_variant(),
-    );
-    theme.connect_change_state(clone!(#[strong] state, move |action, value| {
-        let Some(name) = value.and_then(|v| v.str()) else { return };
-        let Some(choice) = ThemeChoice::parse(name) else { return };
-        action.set_state(&name.to_variant());
-        state.theme.set(choice);
-        state.apply_palette();
-    }));
-    theme.connect_activate(|action, value| {
-        if let Some(value) = value {
-            action.change_state(value);
-            save("theme", value.str().unwrap_or("follow"));
-        }
-    });
-    window.add_action(&theme);
 
     state.view.set_menu(&build_menu(), clone!(#[strong] view, move || {
         copy.set_enabled(view.has_selection());
@@ -272,10 +179,9 @@ pub fn open(app: &Application, options: &Options) -> Result<(), String> {
         window: window.clone(),
         view: view.clone(),
         scrollbar,
-        options: options.clone(),
-        theme: Cell::new(config.theme),
         config: RefCell::new(config),
         desktop_dark: Cell::new(false),
+        prefs: RefCell::new(None),
     });
     add_actions(&state);
 

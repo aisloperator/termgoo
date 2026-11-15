@@ -51,9 +51,8 @@ Command line options apply to that process only. `--title` works as well as `-ti
 
 ## Using it
 
-The right-click menu has Copy, Paste, Select All, the terminal theme, the
-scrollbar toggle, Clear Scrollback, Reset Terminal, the
-configuration commands, About and Close Window.
+The right-click menu has Copy, Paste, Select All, Clear Scrollback, Reset
+Terminal, Preferences, About and Close Window.
 
 | Input | Effect |
 | --- | --- |
@@ -66,12 +65,16 @@ configuration commands, About and Close Window.
 
 ## Configuration
 
-`~/.config/termgoo/config`, or under `$XDG_CONFIG_HOME`. "Open Configuration File"
-on the menu creates it with every setting listed and opens it in `$VISUAL` or
-`$EDITOR`, in a new TermGoo window. With neither set, the desktop's default program
-for `text/plain` opens it instead; `xdg-mime query default text/plain` shows which
-one that is. "Reload Configuration" applies changes to a running window. Choices
-made on the menu are saved here too.
+"Preferences" on the menu opens a window with a control for every setting: the
+terminal theme, the font, scrollback, the scrollbar, `TERM`, and every colour of
+the light and dark themes. A change takes effect in that terminal window at once
+and is saved, so windows opened later start with it. Other windows already open
+keep their settings, and a new `TERM` reaches only programs started afterwards.
+
+The settings are saved in `~/.config/termgoo/config`, or under `$XDG_CONFIG_HOME`,
+which is created with every setting listed the first time one is changed. Saving
+keeps the rest of the file, comments included. The file can also be edited by
+hand; such changes apply to windows opened afterwards.
 
     theme = follow           # light, dark, or follow the desktop
     scrollback = 10000
@@ -93,8 +96,9 @@ Without a `font` setting or `-fn`, the font comes from the desktop. GNOME's
 `monospace-font-name` is used in a GNOME session, or anywhere if it has been set
 explicitly. Otherwise, the font is `Monospace` at the size of GTK's `gtk-font-name`,
 so that a GTK setup without the rest of GNOME gets the size it configured. This is
-read at startup and by "Reload Configuration". A `font = Monospace 11` line written
-by an earlier version counts as a choice, so delete it to get the desktop's font.
+read when the window opens. A `font = Monospace 11` line written by an earlier
+version counts as a choice, so turn on "Use the desktop's font" in Preferences to
+get the desktop's font.
 
 The two terminal themes are separate from the desktop's GUI theme, which the
 scrollbar and menus always follow. The desktop's light or dark preference comes

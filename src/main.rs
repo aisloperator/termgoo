@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod desktop;
 mod input;
+mod prefs;
 mod pty;
 mod term;
 mod view;
