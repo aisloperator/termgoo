@@ -44,7 +44,7 @@ impl State {
         change(&mut new);
         *self.config.borrow_mut() = new.clone();
         if new.font != old.font {
-            self.view.set_font(&zoomed_font(&font_name(&new), self.zoom.get()));
+            self.set_font(&zoomed_font(&font_name(&new), self.zoom.get()));
         }
         if new.scrollback != old.scrollback {
             self.view.set_scrollback(new.scrollback);
@@ -57,10 +57,34 @@ impl State {
         }
     }
 
+    /// Whether the window manager lets the window take whatever size it asks for.
+    fn free_size(&self) -> bool {
+        use gtk::gdk::ToplevelState as T;
+        let fixed = T::MAXIMIZED | T::FULLSCREEN | T::TILED
+            | T::TOP_TILED | T::BOTTOM_TILED | T::LEFT_TILED | T::RIGHT_TILED;
+        let state = self.window.surface().and_downcast::<gtk::gdk::Toplevel>().map(|t| t.state());
+        state.is_some_and(|s| !s.intersects(fixed))
+    }
+
+    /// Change the font, and if the window manager allows, the window's size along
+    /// with it, so that the columns and rows stay the same, as in GNOME Terminal.
+    fn set_font(&self, name: &str) {
+        let (cols, rows) = self.view.grid_size();
+        let (old_w, old_h) = self.view.cell_size();
+        self.view.set_font(name);
+        if !self.free_size() {
+            return;
+        }
+        let (new_w, new_h) = self.view.cell_size();
+        let width = self.window.width() + cols as i32 * (new_w - old_w);
+        let height = self.window.height() + rows as i32 * (new_h - old_h);
+        self.window.set_default_size(width.max(1), height.max(1));
+    }
+
     fn set_zoom(&self, percent: i32) {
         let percent = percent.clamp(ZOOM_LEVELS[0], ZOOM_LEVELS[ZOOM_LEVELS.len() - 1]);
         if percent != self.zoom.replace(percent) {
-            self.view.set_font(&zoomed_font(&font_name(&self.config.borrow()), percent));
+            self.set_font(&zoomed_font(&font_name(&self.config.borrow()), percent));
         }
     }
 

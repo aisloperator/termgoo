@@ -53,8 +53,10 @@ Command line options apply to that process only. `--title` works as well as `-ti
 
 The right-click menu has Copy, Paste, Select All, Clear Scrollback, Reset
 Terminal, Zoom, Preferences, About and Close Window. The Zoom submenu has Zoom In,
-Zoom Out, Normal Size and sizes from 50% to 300%. Zoom applies to that window only,
-is not saved, and keeps the window's size, so the number of rows and columns changes.
+Zoom Out, Normal Size and sizes from 50% to 300%. Zoom applies to that window only
+and is not saved. The window grows or shrinks with it, keeping the same columns and
+rows, unless it is maximized, full screen or tiled, in which case the number of
+columns and rows changes instead. A font chosen in Preferences works the same way.
 
 | Input | Effect |
 | --- | --- |

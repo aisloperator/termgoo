@@ -330,6 +330,18 @@ impl TermView {
         self.queue_draw();
     }
 
+    /// Columns and rows of the terminal.
+    pub fn grid_size(&self) -> (usize, usize) {
+        let term = self.inner().term.borrow();
+        (term.cols, term.rows)
+    }
+
+    /// Width and height of a character cell in pixels.
+    pub fn cell_size(&self) -> (i32, i32) {
+        let f = self.inner().font.borrow();
+        (f.cell_w, f.cell_h)
+    }
+
     pub fn set_scrollback(&self, lines: usize) {
         self.inner().term.borrow_mut().set_max_scrollback(lines);
         self.sync_adjustment();
