@@ -547,6 +547,20 @@ impl TermView {
     fn key_pressed(&self, key: Key, state: M) -> Propagation {
         let mods = state & (M::SHIFT_MASK | M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK | M::META_MASK);
         let ctrl_shift = M::CONTROL_MASK | M::SHIFT_MASK;
+        // Zoom, as in browsers. Plus needs Shift on many layouts, so it is taken with
+        // or without; Ctrl+Shift+minus stays Ctrl+_ for the program.
+        let zoom = match key {
+            Key::plus | Key::KP_Add if mods == M::CONTROL_MASK || mods == ctrl_shift => Some("win.zoom-in"),
+            Key::equal if mods == M::CONTROL_MASK => Some("win.zoom-in"),
+            Key::minus | Key::KP_Subtract if mods == M::CONTROL_MASK => Some("win.zoom-out"),
+            Key::_0 | Key::KP_0 | Key::KP_Insert if mods == M::CONTROL_MASK => Some("win.zoom-reset"),
+            _ => None,
+        };
+        if let Some(action) = zoom {
+            if WidgetExt::activate_action(self, action, None).is_ok() {
+                return Propagation::Stop;
+            }
+        }
         if mods == ctrl_shift {
             match key.to_upper() {
                 Key::C => {

@@ -52,12 +52,15 @@ Command line options apply to that process only. `--title` works as well as `-ti
 ## Using it
 
 The right-click menu has Copy, Paste, Select All, Clear Scrollback, Reset
-Terminal, Preferences, About and Close Window.
+Terminal, Zoom, Preferences, About and Close Window. The Zoom submenu has Zoom In,
+Zoom Out, Normal Size and sizes from 50% to 300%. Zoom applies to that window only,
+is not saved, and keeps the window's size, so the number of rows and columns changes.
 
 | Input | Effect |
 | --- | --- |
 | Drag; double or triple click | Select by character, word or line |
 | Ctrl+Shift+C, Ctrl+Shift+V | Copy, paste |
+| Ctrl+plus (or Ctrl+=), Ctrl+minus, Ctrl+0 | Zoom in, zoom out, normal size |
 | Middle click, Shift+Insert | Paste the X11-style primary selection |
 | Shift+PageUp, PageDown, Home, End | Move through the scrollback |
 | Mouse wheel, scrollbar | Scroll |
